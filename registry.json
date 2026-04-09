@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "indexes": [
+    {
+      "name": "fma-small",
+      "description": "Free Music Archive — 8,000 tracks across 8 genres (30-second clips, CC-licensed)",
+      "embedder": "effnet-discogs",
+      "tracks": 8000,
+      "url": "https://github.com/horacio/simil/releases/download/indexes/fma-small-effnet-discogs.tar.gz",
+      "sha256": "__FILL_AFTER_BUILD__",
+      "size_bytes": 0
+    }
+  ]
+}

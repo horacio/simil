@@ -49,7 +49,8 @@ def _require_index(index_dir: Path, library: str) -> None:
     if not (index_dir / "meta.json").exists():
         _abort(
             f"No index found for library {library!r} at {index_dir}.\n"
-            "  Run [bold]simil index PATH[/bold] to build it first."
+            "  Build from your local files : [bold]simil index PATH[/bold]\n"
+            "  Download a pre-built index  : [bold]simil fetch[/bold]"
         )
 
 
@@ -513,3 +514,121 @@ def serve(
     console.print("  Press [bold]Ctrl+C[/bold] to stop\n")
 
     uvicorn.run(api, host=host, port=port, reload=reload)  # type: ignore[arg-type]
+
+
+@app.command()
+def fetch(
+    name: Annotated[
+        Optional[str],
+        typer.Argument(
+            help="Index name to download (e.g. fma-small). Omit to list available indexes."
+        ),
+    ] = None,
+    library: Annotated[
+        str,
+        typer.Option("--library", "-l", help="Library slot to save the index into."),
+    ] = "",
+    registry_url: Annotated[
+        Optional[str],
+        typer.Option("--registry", help="Override the registry URL."),
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompts."),
+    ] = False,
+) -> None:
+    """List or download pre-built indexes from the simil registry.
+
+    Run without arguments to see what's available, then pass a name to
+    download it.
+
+    \\b
+    Examples:
+        simil fetch                          # list available indexes
+        simil fetch fma-small               # download as library 'fma-small'
+        simil fetch fma-small --library pop # save into library slot 'pop'
+        simil fetch fma-small --yes         # skip confirmation
+    """
+    from simil.registry import (
+        ChecksumError,
+        IndexEntry,
+        RegistryError,
+        download_index,
+        fetch_registry,
+    )
+    from simil.registry import REGISTRY_URL
+
+    url = registry_url or REGISTRY_URL
+
+    with console.status("Fetching registry…", spinner="dots"):
+        try:
+            entries: list[IndexEntry] = fetch_registry(url)
+        except RegistryError as exc:
+            _abort(str(exc))
+
+    # ── List mode ──────────────────────────────────────────────────────────────
+    if name is None:
+        if not entries:  # type: ignore[union-attr]
+            console.print(
+                "[yellow]No pre-built indexes available yet.[/yellow]\n"
+                "  Build your own : [bold]simil index PATH[/bold]\n"
+                "  Or check back  : https://github.com/horacio/simil"
+            )
+            return
+
+        tbl = Table(
+            title="[bold]Pre-built indexes[/bold]",
+            box=box.ROUNDED,
+            header_style="bold cyan",
+        )
+        tbl.add_column("Name", style="cyan")
+        tbl.add_column("Embedder", style="yellow")
+        tbl.add_column("Tracks", justify="right")
+        tbl.add_column("Size", justify="right")
+        tbl.add_column("Description")
+        for e in entries:  # type: ignore[union-attr]
+            size_str = f"{e.size_mb:.0f} MB" if e.size_bytes else "—"
+            tbl.add_row(e.name, e.embedder, f"{e.tracks:,}", size_str, e.description)
+        console.print(tbl)
+        console.print(
+            "\nDownload with: [bold cyan]simil fetch <name>[/bold cyan]"
+        )
+        return
+
+    # ── Download mode ──────────────────────────────────────────────────────────
+    entry = next((e for e in entries if e.name == name), None)  # type: ignore[union-attr]
+    if entry is None:
+        available = ", ".join(e.name for e in entries) or "none"  # type: ignore[union-attr]
+        _abort(
+            f"Unknown index {name!r}. Available: {available}\n"
+            "  Run [bold]simil fetch[/bold] to see the full list."
+        )
+
+    dest_library = library or entry.name  # type: ignore[union-attr]
+    index_dir = _get_index_dir(dest_library)
+
+    if (index_dir / "meta.json").exists() and not yes:
+        confirmed = typer.confirm(
+            f"Library {dest_library!r} already has an index. Overwrite?"
+        )
+        if not confirmed:
+            raise typer.Exit(0)
+
+    size_str = f"{entry.size_mb:.0f} MB" if entry.size_bytes else "unknown size"  # type: ignore[union-attr]
+    console.print(
+        f"\nDownloading [cyan]{entry.name}[/cyan] ({size_str}) "  # type: ignore[union-attr]
+        f"→ library [cyan]{dest_library!r}[/cyan]"
+    )
+
+    try:
+        download_index(entry, index_dir)  # type: ignore[union-attr]
+    except ChecksumError as exc:
+        _abort(str(exc))
+    except RegistryError as exc:
+        _abort(str(exc))
+
+    console.print(
+        f"[green]✓[/green] {entry.tracks:,} tracks ready in library [cyan]{dest_library!r}[/cyan].\n"  # type: ignore[union-attr]
+        f"  Search  : [bold]simil search SOURCE --library {dest_library}[/bold]\n"
+        f"  Web UI  : [bold]simil serve --library {dest_library}[/bold]"
+    )

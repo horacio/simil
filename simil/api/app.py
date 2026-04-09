@@ -240,7 +240,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 content={
                     "ready": False,
                     "library": settings.library_name,
-                    "message": "Index not built yet.",
+                    "message": (
+                        "Index not built yet. "
+                        "Run \u2018simil index PATH\u2019 to build from local files, "
+                        "or \u2018simil fetch\u2019 to download a pre-built index."
+                    ),
+                    "hint_fetch": "simil fetch",
+                    "hint_index": "simil index PATH",
                 }
             )
 

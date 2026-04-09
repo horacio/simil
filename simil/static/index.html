@@ -180,6 +180,21 @@
     }
     #status-bar .err { color: var(--red); }
     #status-bar .ok { color: var(--green); }
+    .setup-hint {
+      margin-top: 24px; padding: 16px 20px;
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      border-radius: 8px; font-size: 0.88rem;
+    }
+    .setup-hint p { margin: 0 0 10px; color: var(--text-dim); }
+    .setup-hint p:last-child { margin-bottom: 0; }
+    .setup-hint pre {
+      margin: 0 0 10px; padding: 10px 14px;
+      background: var(--bg); border-radius: 6px;
+      font-family: monospace; font-size: 0.85rem;
+      white-space: pre; overflow-x: auto;
+    }
+    .setup-hint .comment { color: var(--text-dim); }
 
     /* ── Spinner ── */
     .spinner {
@@ -731,6 +746,15 @@ function basename(path) {
     const data = await resp.json();
     if (!data.ready) {
       setStatus("error", data.message || "Index not ready.");
+      // Show setup instructions below the search form
+      const hint = document.createElement("div");
+      hint.className = "setup-hint";
+      hint.innerHTML = `
+        <p>No index found. Get started with one of:</p>
+        <pre>simil fetch              <span class="comment"># download a pre-built catalog</span>
+simil index ~/Music      <span class="comment"># build from your local files</span></pre>
+        <p>Then restart the server.</p>`;
+      document.querySelector(".search-panel").appendChild(hint);
     } else {
       setStatus("ok",
         `${data.tracks.toLocaleString()} tracks indexed · ${data.embedder} · ready`);
