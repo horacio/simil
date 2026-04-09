@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "simil"
+version = "0.1.0"
+description = "Find similar-sounding tracks in your local music library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "numpy>=1.26",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "onnxruntime>=1.17",
+    "mutagen>=1.47",
+    "filelock>=3.13",
+    "pydantic-settings>=2.3",
+    "typer[rich]>=0.12",
+    "rich>=13",
+    "tqdm>=4.66",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "yt-dlp>=2024.1.1",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+faiss = ["faiss-cpu>=1.8"]
+clap = ["laion-clap>=1.1.4", "torch>=2.2", "torchaudio>=2.2"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+simil = "simil.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["simil"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "slow: requires model download or long runtime",
+    "integration: integration tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "PTH"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true

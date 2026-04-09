@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>simil — music similarity search</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a24;
+      --surface2: #22222f;
+      --border: #2e2e40;
+      --accent: #7c6af7;
+      --accent-hover: #9585ff;
+      --text: #e8e8f0;
+      --text-dim: #8888a8;
+      --green: #4ecdc4;
+      --red: #ff6b6b;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      padding: 28px 24px 0;
+      text-align: center;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    header h1 span { color: var(--accent); }
+    header p {
+      color: var(--text-dim);
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+
+    main {
+      width: 100%;
+      max-width: 760px;
+      padding: 28px 16px 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Search card ── */
+    .search-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px 8px;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    .tab-btn:hover { background: var(--surface2); color: var(--text); }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom: 2px solid var(--accent);
+      margin-bottom: -1px;
+    }
+
+    .tab-panel { display: none; padding: 20px; }
+    .tab-panel.active { display: block; }
+
+    /* Drop zone */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .drop-zone:hover, .drop-zone.over {
+      border-color: var(--accent);
+      background: rgba(124, 106, 247, 0.06);
+    }
+    .drop-zone svg { opacity: 0.4; margin-bottom: 10px; }
+    .drop-zone p { color: var(--text-dim); font-size: 0.9rem; }
+    .drop-zone p span { color: var(--accent); text-decoration: underline; cursor: pointer; }
+    #file-input { display: none; }
+    #chosen-file {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: var(--green);
+      word-break: break-all;
+    }
+
+    /* Text/URL input */
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+    .input-row input {
+      flex: 1;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input-row input:focus { border-color: var(--accent); }
+    .input-row input::placeholder { color: var(--text-dim); }
+
+    .search-btn {
+      padding: 10px 22px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .search-btn:hover { background: var(--accent-hover); }
+    .search-btn:active { transform: scale(0.97); }
+    .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .hint { font-size: 0.8rem; color: var(--text-dim); margin-top: 8px; }
+
+    /* Options row */
+    .options-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .options-row label { font-size: 0.8rem; color: var(--text-dim); }
+    .options-row input[type=number] {
+      width: 56px;
+      padding: 4px 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    /* ── Status bar ── */
+    #status-bar {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      text-align: center;
+    }
+    #status-bar .err { color: var(--red); }
+    #status-bar .ok { color: var(--green); }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Results ── */
+    #results { display: flex; flex-direction: column; gap: 10px; }
+    #results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    #results-header h2 { font-size: 1rem; font-weight: 600; }
+    #results-header span { font-size: 0.8rem; color: var(--text-dim); }
+
+    .result-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: border-color 0.15s;
+    }
+    .result-card:hover { border-color: var(--accent); }
+
+    .rank {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      width: 22px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .score-bar-wrap {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      width: 38px;
+    }
+    .score-val { font-size: 0.75rem; font-weight: 600; color: var(--accent); }
+    .score-bar {
+      width: 100%;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .score-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+
+    .track-info { flex: 1; min-width: 0; }
+    .track-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .track-artist {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .track-path {
+      font-size: 0.72rem;
+      color: var(--border);
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .result-card:hover .track-path { color: var(--text-dim); }
+
+    /* Audio player */
+    .play-btn {
+      flex-shrink: 0;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .play-btn:hover { background: var(--accent); border-color: var(--accent); }
+    .play-btn.playing { background: var(--accent); border-color: var(--accent); }
+    .play-btn svg { pointer-events: none; }
+    .play-btn.no-audio { opacity: 0.3; cursor: default; }
+    .play-btn.no-audio:hover { background: var(--surface2); border-color: var(--border); }
+
+    .find-more-btn {
+      flex-shrink: 0;
+      padding: 5px 10px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-dim);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .find-more-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Floating audio bar */
+    #audio-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 10px 20px;
+      display: none;
+      align-items: center;
+      gap: 14px;
+      z-index: 100;
+    }
+    #audio-bar.visible { display: flex; }
+    #audio-bar-title { font-size: 0.85rem; font-weight: 600; flex: 1; min-width: 0; }
+    #audio-bar-artist { font-size: 0.78rem; color: var(--text-dim); }
+    #audio-bar audio { flex: 2; min-width: 0; height: 32px; }
+    #audio-bar-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 1.2rem;
+      padding: 4px 8px;
+    }
+    #audio-bar-close:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1><span>simil</span></h1>
+  <p>Find similar-sounding tracks in your music library</p>
+</header>
+
+<main>
+
+  <!-- Search card -->
+  <div class="search-card">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="file">Upload file</button>
+      <button class="tab-btn" data-tab="url">URL</button>
+      <button class="tab-btn" data-tab="text">Text search</button>
+    </div>
+
+    <!-- File upload tab -->
+    <div id="tab-file" class="tab-panel active">
+      <div class="drop-zone" id="drop-zone">
+        <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9 19V6l12-3v13M9 19c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm12-3c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2z"/>
+        </svg>
+        <p>Drop an audio file here or <span id="browse-link">browse</span></p>
+        <p style="font-size:0.78rem;margin-top:6px">MP3, FLAC, WAV, OGG, M4A, AAC…</p>
+        <input type="file" id="file-input" accept="audio/*">
+        <div id="chosen-file"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;padding-top:12px">
+        <button class="search-btn" id="file-search-btn" disabled>Search</button>
+      </div>
+    </div>
+
+    <!-- URL tab -->
+    <div id="tab-url" class="tab-panel">
+      <div class="input-row">
+        <input type="url" id="url-input"
+          placeholder="YouTube, SoundCloud, Bandcamp, or Spotify URL…">
+        <button class="search-btn" id="url-search-btn">Search</button>
+      </div>
+      <p class="hint">Paste a track link and we'll find similar-sounding songs in your library.</p>
+    </div>
+
+    <!-- Text tab -->
+    <div id="tab-text" class="tab-panel">
+      <div class="input-row">
+        <input type="text" id="text-input"
+          placeholder="e.g. "dark ambient drone", "melancholic lo-fi jazz"…">
+        <button class="search-btn" id="text-search-btn">Search</button>
+      </div>
+      <p class="hint">Requires the CLAP embedder (text + audio share the same space).</p>
+    </div>
+
+    <!-- Options row -->
+    <div class="options-row">
+      <label>Results <input type="number" id="top-k" value="10" min="1" max="100"></label>
+      <label>Min score <input type="number" id="min-score" value="0" min="-1" max="1" step="0.05"></label>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div id="status-bar"></div>
+
+  <!-- Results -->
+  <div id="results"></div>
+
+</main>
+
+<!-- Floating audio bar -->
+<div id="audio-bar">
+  <div>
+    <div id="audio-bar-title">—</div>
+    <div id="audio-bar-artist"></div>
+  </div>
+  <audio id="audio-player" controls></audio>
+  <button id="audio-bar-close" title="Close player">✕</button>
+</div>
+
+<script>
+"use strict";
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let activePlayBtn = null;
+let activeTrackId = null;
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const target = btn.dataset.tab;
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-" + target).classList.add("active");
+  });
+});
+
+// ── File drop zone ─────────────────────────────────────────────────────────────
+const dropZone = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+const chosenFile = document.getElementById("chosen-file");
+const fileSearchBtn = document.getElementById("file-search-btn");
+let chosenFileObj = null;
+
+document.getElementById("browse-link").addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("click", e => { if (e.target !== document.getElementById("browse-link")) fileInput.click(); });
+
+fileInput.addEventListener("change", () => {
+  if (fileInput.files[0]) selectFile(fileInput.files[0]);
+});
+
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("over"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("over"));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropZone.classList.remove("over");
+  const f = e.dataTransfer.files[0];
+  if (f) selectFile(f);
+});
+
+function selectFile(f) {
+  chosenFileObj = f;
+  chosenFile.textContent = f.name + " (" + (f.size / 1024 / 1024).toFixed(1) + " MB)";
+  fileSearchBtn.disabled = false;
+}
+
+fileSearchBtn.addEventListener("click", () => {
+  if (chosenFileObj) doFileSearch(chosenFileObj);
+});
+
+// ── URL + text search ─────────────────────────────────────────────────────────
+document.getElementById("url-search-btn").addEventListener("click", () => {
+  const val = document.getElementById("url-input").value.trim();
+  if (val) doSourceSearch(val);
+});
+document.getElementById("url-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("url-search-btn").click();
+});
+
+document.getElementById("text-search-btn").addEventListener("click", () => {
+  const val = document.getElementById("text-input").value.trim();
+  if (val) doSourceSearch(val);
+});
+document.getElementById("text-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("text-search-btn").click();
+});
+
+// ── Search functions ──────────────────────────────────────────────────────────
+function getSearchOpts() {
+  return {
+    topK: parseInt(document.getElementById("top-k").value, 10) || 10,
+    minScore: parseFloat(document.getElementById("min-score").value) || 0,
+  };
+}
+
+async function doFileSearch(file) {
+  setStatus("loading", "Uploading and searching…");
+  disableButtons(true);
+  const { topK, minScore } = getSearchOpts();
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const resp = await fetch(`/api/search?top_k=${topK}&min_score=${minScore}`, {
+      method: "POST",
+      body: form,
+    });
+    await handleResponse(resp);
+  } catch (err) {
+    setStatus("error", "Network error: " + err.message);
+  } finally {
+    disableButtons(false);
+  }
+}
+
+async function doSourceSearch(source) {
+  setStatus("loading", "Searching…");
+  disableButtons(true);
+  const { topK, minScore } = getSearchOpts();
+  try {
+    const resp = await fetch(`/api/search?top_k=${topK}&min_score=${minScore}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source }),
+    });
+    await handleResponse(resp);
+  } catch (err) {
+    setStatus("error", "Network error: " + err.message);
+  } finally {
+    disableButtons(false);
+  }
+}
+
+async function handleResponse(resp) {
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    setStatus("error", body.detail || "Search failed.");
+    renderResults([]);
+    return;
+  }
+  const results = await resp.json();
+  if (results.length === 0) {
+    setStatus("ok", "No results found.");
+    renderResults([]);
+  } else {
+    setStatus("ok", `Found ${results.length} result${results.length !== 1 ? "s" : ""}.`);
+    renderResults(results);
+  }
+}
+
+function disableButtons(disabled) {
+  [fileSearchBtn,
+   document.getElementById("url-search-btn"),
+   document.getElementById("text-search-btn"),
+  ].forEach(b => b.disabled = disabled);
+}
+
+// ── Render results ────────────────────────────────────────────────────────────
+function renderResults(results) {
+  const el = document.getElementById("results");
+  if (results.length === 0) { el.innerHTML = ""; return; }
+
+  el.innerHTML = `
+    <div id="results-header">
+      <h2>Results</h2>
+      <span>${results.length} track${results.length !== 1 ? "s" : ""}</span>
+    </div>
+  `;
+
+  results.forEach(r => {
+    const card = document.createElement("div");
+    card.className = "result-card";
+
+    const pct = Math.round(r.score * 100);
+    const title = esc(r.title || basename(r.path || "") || "Unknown");
+    const artist = esc(r.artist || "");
+    const pathStr = esc(r.path || "");
+
+    const playIcon = `<svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M8 5v14l11-7z"/>
+    </svg>`;
+    const pauseIcon = `<svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+    </svg>`;
+
+    const isPlaying = activeTrackId === r.track_id;
+    const canPlay = r.has_audio;
+
+    card.innerHTML = `
+      <div class="rank">${r.rank}</div>
+      <div class="score-bar-wrap">
+        <div class="score-val">${pct}%</div>
+        <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
+      </div>
+      <div class="track-info">
+        <div class="track-title">${title}</div>
+        ${artist ? `<div class="track-artist">${artist}</div>` : ""}
+        <div class="track-path">${pathStr}</div>
+      </div>
+      <button class="find-more-btn" data-track-id="${r.track_id}" title="Find more like this">
+        More like this
+      </button>
+      <button class="play-btn ${canPlay ? "" : "no-audio"} ${isPlaying ? "playing" : ""}"
+              data-track-id="${r.track_id}"
+              data-title="${title}" data-artist="${artist}"
+              title="${canPlay ? "Play preview" : "Audio file unavailable"}">
+        ${isPlaying ? pauseIcon : playIcon}
+      </button>
+    `;
+
+    el.appendChild(card);
+  });
+
+  // Play button handlers
+  el.querySelectorAll(".play-btn:not(.no-audio)").forEach(btn => {
+    btn.addEventListener("click", () => togglePlay(btn));
+  });
+
+  // "Find more like this" handlers
+  el.querySelectorAll(".find-more-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const trackId = btn.dataset.trackId;
+      findMoreLike(trackId);
+    });
+  });
+}
+
+// ── Audio playback ────────────────────────────────────────────────────────────
+const audioPlayer = document.getElementById("audio-player");
+const audioBar = document.getElementById("audio-bar");
+
+audioPlayer.addEventListener("ended", () => resetPlayState());
+audioPlayer.addEventListener("pause", () => {
+  if (activePlayBtn) updatePlayBtn(activePlayBtn, false);
+});
+audioPlayer.addEventListener("play", () => {
+  if (activePlayBtn) updatePlayBtn(activePlayBtn, true);
+});
+
+document.getElementById("audio-bar-close").addEventListener("click", () => {
+  audioPlayer.pause();
+  audioPlayer.src = "";
+  audioBar.classList.remove("visible");
+  resetPlayState();
+});
+
+function togglePlay(btn) {
+  const trackId = btn.dataset.trackId;
+  if (activeTrackId === trackId && !audioPlayer.paused) {
+    audioPlayer.pause();
+    return;
+  }
+  if (activePlayBtn && activePlayBtn !== btn) {
+    updatePlayBtn(activePlayBtn, false);
+  }
+  activePlayBtn = btn;
+  activeTrackId = trackId;
+  document.getElementById("audio-bar-title").textContent = btn.dataset.title || "—";
+  document.getElementById("audio-bar-artist").textContent = btn.dataset.artist || "";
+  audioPlayer.src = `/api/audio/${trackId}`;
+  audioPlayer.play();
+  audioBar.classList.add("visible");
+  updatePlayBtn(btn, true);
+}
+
+function updatePlayBtn(btn, playing) {
+  const playIcon = `<svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
+  const pauseIcon = `<svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+  btn.classList.toggle("playing", playing);
+  btn.innerHTML = playing ? pauseIcon : playIcon;
+}
+
+function resetPlayState() {
+  if (activePlayBtn) updatePlayBtn(activePlayBtn, false);
+  activePlayBtn = null;
+  activeTrackId = null;
+}
+
+// ── "Find more like this" ─────────────────────────────────────────────────────
+async function findMoreLike(trackId) {
+  // We need the file path for the track — use the audio endpoint as a proxy:
+  // Search using the audio file of the given track by resolving via content_id
+  // We send the path which is stored server-side via a track lookup endpoint.
+  // For now, use the /api/audio/{id} URL as the search source.
+  const source = `/api/audio/${trackId}`;
+
+  // Actually, we need to search by uploading the file content or by using
+  // a special endpoint. For simplicity, fetch the audio and re-upload.
+  setStatus("loading", "Finding similar tracks…");
+  disableButtons(true);
+  const { topK, minScore } = getSearchOpts();
+  try {
+    const audioResp = await fetch(`/api/audio/${trackId}`);
+    if (!audioResp.ok) throw new Error("Could not fetch audio for " + trackId);
+    const blob = await audioResp.blob();
+    const form = new FormData();
+    form.append("file", blob, trackId + ".audio");
+    const resp = await fetch(`/api/search?top_k=${topK}&min_score=${minScore}`, {
+      method: "POST",
+      body: form,
+    });
+    await handleResponse(resp);
+  } catch (err) {
+    setStatus("error", "Error: " + err.message);
+  } finally {
+    disableButtons(false);
+  }
+}
+
+// ── Status bar ────────────────────────────────────────────────────────────────
+function setStatus(type, msg) {
+  const el = document.getElementById("status-bar");
+  if (type === "loading") {
+    el.innerHTML = `<span class="spinner"></span>${esc(msg)}`;
+  } else if (type === "error") {
+    el.innerHTML = `<span class="err">⚠ ${esc(msg)}</span>`;
+  } else {
+    el.innerHTML = `<span class="ok">${esc(msg)}</span>`;
+  }
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function esc(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function basename(path) {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+// ── Load status on startup ────────────────────────────────────────────────────
+(async () => {
+  try {
+    const resp = await fetch("/api/status");
+    const data = await resp.json();
+    if (!data.ready) {
+      setStatus("error", data.message || "Index not ready.");
+    } else {
+      setStatus("ok",
+        `${data.tracks.toLocaleString()} tracks indexed · ${data.embedder} · ready`);
+    }
+  } catch {
+    setStatus("error", "Could not connect to server.");
+  }
+})();
+</script>
+</body>
+</html>
