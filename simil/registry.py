@@ -29,6 +29,10 @@ import httpx
 
 from simil.core.exceptions import SimILError
 
+# Bundled registry — always available, even offline or from a private repo.
+# Updated in-sync with registry.json at the repo root via build tooling.
+_BUNDLED_REGISTRY_PATH = Path(__file__).parent.parent / "registry.json"
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 # Points at the raw JSON file in the repo — updated in-place when new indexes
@@ -88,7 +92,11 @@ def fetch_registry(
     *,
     timeout: float = 15.0,
 ) -> list[IndexEntry]:
-    """Fetch and parse the remote registry manifest.
+    """Fetch and parse the registry manifest.
+
+    Tries the remote URL first so users always get the latest list.
+    Falls back to the bundled ``registry.json`` shipped with the package
+    if the remote is unreachable (private repo, no internet, etc.).
 
     Args:
         url:     URL of the registry JSON file.
@@ -98,20 +106,15 @@ def fetch_registry(
         List of :class:`IndexEntry` objects available for download.
 
     Raises:
-        RegistryError: On network failure or unexpected response format.
+        RegistryError: Only if both remote and bundled registry fail.
     """
     try:
         resp = httpx.get(url, timeout=timeout, follow_redirects=True)
         resp.raise_for_status()
         data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        raise RegistryError(
-            f"Registry returned HTTP {exc.response.status_code}: {url}"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise RegistryError(f"Could not reach registry at {url}: {exc}") from exc
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise RegistryError(f"Malformed registry response: {exc}") from exc
+    except (httpx.HTTPError, httpx.HTTPStatusError, json.JSONDecodeError, ValueError):
+        # Remote unavailable — fall back to bundled copy silently
+        data = _load_bundled_registry()
 
     try:
         raw_entries: list[dict] = data["indexes"]
@@ -119,6 +122,16 @@ def fetch_registry(
         raise RegistryError(f"Unexpected registry schema (missing 'indexes'): {exc}") from exc
 
     return [IndexEntry.from_dict(entry) for entry in raw_entries]
+
+
+def _load_bundled_registry() -> dict:
+    """Load the registry.json bundled with the package."""
+    try:
+        return json.loads(_BUNDLED_REGISTRY_PATH.read_text())
+    except Exception as exc:
+        raise RegistryError(
+            f"Could not load bundled registry at {_BUNDLED_REGISTRY_PATH}: {exc}"
+        ) from exc
 
 
 # ── Download, verify, extract ─────────────────────────────────────────────────

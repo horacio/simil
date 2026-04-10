@@ -142,30 +142,43 @@ def test_fetch_registry_returns_empty_list() -> None:
     assert entries == []
 
 
-def test_fetch_registry_http_error_raises() -> None:
+def test_fetch_registry_http_error_falls_back_to_bundled() -> None:
+    """Network failure falls back to the bundled registry.json silently."""
     import httpx
 
     with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
-        with pytest.raises(RegistryError, match="Could not reach registry"):
-            fetch_registry()
+        entries = fetch_registry()
+    # Bundled registry.json ships with fma-small
+    assert isinstance(entries, list)
 
 
-def test_fetch_registry_404_raises() -> None:
+def test_fetch_registry_404_falls_back_to_bundled() -> None:
+    """404 from remote falls back to bundled registry.json silently."""
     mock_resp = _mock_httpx_get({}, status=404)
     with patch("httpx.get", return_value=mock_resp):
-        with pytest.raises(RegistryError, match="HTTP 404"):
-            fetch_registry()
+        entries = fetch_registry()
+    assert isinstance(entries, list)
 
 
-def test_fetch_registry_bad_json_raises() -> None:
-    import httpx
-
+def test_fetch_registry_bad_json_falls_back_to_bundled() -> None:
+    """Malformed JSON from remote falls back to bundled registry.json."""
     mock_resp = MagicMock()
     mock_resp.raise_for_status.return_value = None
     mock_resp.json.side_effect = json.JSONDecodeError("bad", "", 0)
     with patch("httpx.get", return_value=mock_resp):
-        with pytest.raises(RegistryError, match="Malformed"):
-            fetch_registry()
+        entries = fetch_registry()
+    assert isinstance(entries, list)
+
+
+def test_fetch_registry_both_fail_raises() -> None:
+    """Raises RegistryError only when both remote AND bundled registry fail."""
+    import httpx
+
+    with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
+        with patch("simil.registry._load_bundled_registry",
+                   side_effect=RegistryError("bundled missing")):
+            with pytest.raises(RegistryError):
+                fetch_registry()
 
 
 def test_fetch_registry_missing_indexes_key_raises() -> None:
