@@ -214,20 +214,33 @@ def main() -> None:
     print(f"\n[2/4] Building index with {args.embedder}…")
     library_name = f"build_{short_name}"
 
-    result = subprocess.run(
-        [
-            sys.executable, "-m", "simil.cli.main", "index",
-            str(audio_dir),
-            "--embedder", args.embedder,
-            "--library", library_name,
-            "--workers", str(args.workers),
-            "--full",
-        ],
-        check=True,
-    )
-
+    from simil.catalog import TrackCatalog
     from simil.cli.main import _get_index_dir
+    from simil.config import Settings
+    from simil.embedders import get_embedder
+    from simil.index.numpy_index import NumpyIndex
+    from simil.library.indexer import Indexer
+
     index_dir = _get_index_dir(library_name)
+    index_dir.mkdir(parents=True, exist_ok=True)
+
+    emb = get_embedder(args.embedder)
+    idx = NumpyIndex(
+        embedding_dim=emb.embedding_dim,
+        embedder_name=args.embedder,
+        library_id=library_name,
+        audio_config=emb.audio_config,
+    )
+    cat = TrackCatalog(library_id=library_name)
+    settings = Settings(library_name=library_name, workers=args.workers)
+    indexer = Indexer(embedder=emb, index=idx, catalog=cat, settings=settings)
+    build_result = indexer.build(audio_dir, full=True)
+    print(
+        f"  Indexed {build_result.indexed:,} tracks, "
+        f"skipped {build_result.skipped}, "
+        f"failed {len(build_result.failed)} "
+        f"in {build_result.duration_seconds:.1f}s"
+    )
 
     if not (index_dir / "meta.json").exists():
         sys.exit("Error: indexing failed — meta.json not found")
