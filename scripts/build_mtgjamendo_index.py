@@ -371,18 +371,35 @@ def build_index(
     index_dir.mkdir(parents=True, exist_ok=True)
 
     emb = get_embedder(embedder_name)
-    idx = NumpyIndex(
-        embedding_dim=emb.embedding_dim,
-        embedder_name=embedder_name,
-        library_id=library_name,
-        audio_config=emb.audio_config,
-    )
-    cat = TrackCatalog(library_id=library_name)
+
+    # Load existing index/catalog if present so incremental builds resume cleanly.
+    if (index_dir / "meta.json").exists():
+        try:
+            idx = NumpyIndex.load(index_dir)
+            cat = TrackCatalog.load(index_dir / "catalog.json", library_id=library_name)
+            already = cat.size
+            print(f"  Resuming — {already:,} tracks already indexed.")
+        except Exception as exc:
+            print(f"  Warning: could not load existing index ({exc}). Starting fresh.")
+            idx = NumpyIndex(
+                embedding_dim=emb.embedding_dim, embedder_name=embedder_name,
+                library_id=library_name, audio_config=emb.audio_config,
+            )
+            cat = TrackCatalog(library_id=library_name)
+    else:
+        idx = NumpyIndex(
+            embedding_dim=emb.embedding_dim, embedder_name=embedder_name,
+            library_id=library_name, audio_config=emb.audio_config,
+        )
+        cat = TrackCatalog(library_id=library_name)
+
     settings = Settings(library_name=library_name, workers=workers)
     indexer = Indexer(embedder=emb, index=idx, catalog=cat, settings=settings)
 
     try:
-        result = indexer.build(audio_dir, full=True)
+        # full=False → incremental: skips tracks already in the index.
+        # If the build was interrupted, re-running resumes from where it left off.
+        result = indexer.build(audio_dir, full=False)
     finally:
         _meta_mod.extract_metadata = _orig_extract
 
