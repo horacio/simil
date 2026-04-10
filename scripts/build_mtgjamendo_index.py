@@ -49,10 +49,10 @@ from typing import Any
 # MTG-Jamendo metadata files (from their GitHub repo)
 # ---------------------------------------------------------------------------
 
-# Raw metadata TSV hosted on GitHub — contains track_id, artist, title, tags, duration
+# Raw metadata TSV hosted on GitHub — contains track_id, artist_id, album_id, path, duration, tags
 MTG_METADATA_URL = (
     "https://raw.githubusercontent.com/MTG/mtg-jamendo-dataset/"
-    "master/data/tracks.tsv"
+    "master/data/raw.tsv"
 )
 
 # Jamendo audio download URL template
@@ -105,24 +105,23 @@ def fetch_metadata(
     subset: str,
     limit: int = 0,
 ) -> list[dict]:
-    """Download MTG-Jamendo metadata TSV and filter to *subset*.
+    """Download MTG-Jamendo raw.tsv and return filtered track list.
 
-    The TSV is cached locally — re-runs skip the download.
+    TSV columns (tab-separated, first row is header):
+      TRACK_ID  ARTIST_ID  ALBUM_ID  PATH  DURATION  TAGS
 
-    Args:
-        cache_dir: Directory to cache the TSV.
-        subset:    One of "all", "electronic", "ambient".
-        limit:     Max tracks (0 = all).
+    Example row:
+      track_0000214  artist_000014  album_000031  14/214.mp3  124.6  genre---punk
 
-    Returns:
-        List of track dicts: id, name, artist_name, tags, duration.
+    TAGS is a single space-separated field with values like ``genre---electronic``.
+    The numeric track ID (214) is used to construct the Jamendo CDN audio URL.
     """
     import httpx
 
-    tsv_path = cache_dir / "tracks.tsv"
+    tsv_path = cache_dir / "raw.tsv"
 
     if not tsv_path.exists():
-        print(f"  Downloading MTG-Jamendo metadata TSV…")
+        print(f"  Downloading MTG-Jamendo metadata (~8 MB)…")
         resp = httpx.get(MTG_METADATA_URL, timeout=60, follow_redirects=True)
         resp.raise_for_status()
         tsv_path.write_bytes(resp.content)
@@ -130,68 +129,59 @@ def fetch_metadata(
     else:
         print(f"  Using cached metadata: {tsv_path}")
 
-    # Parse TSV
-    # Format: TRACK_ID\tARTIST_ID\tALBUM_ID\tPATH\tDURATION\tTAGS...
-    # Header line starts with #
+    filter_tags = SUBSET_TAGS.get(subset, set())
+    tracks: list[dict] = []
+
     lines = tsv_path.read_text(encoding="utf-8").splitlines()
-    # Find header
-    header_line = next((l for l in lines if l.startswith("TRACK")), None)
-    if header_line is None:
-        # Try first non-comment line
-        header_line = next((l for l in lines if not l.startswith("#")), lines[0])
-
-    headers = header_line.strip().split("\t")
-    tracks = []
-
     for line in lines:
-        if line.startswith("#") or line == header_line or not line.strip():
+        line = line.strip()
+        if not line or line.startswith("TRACK_ID"):  # skip header
             continue
-        parts = line.strip().split("\t")
+
+        parts = line.split("\t")
         if len(parts) < 5:
             continue
 
-        # TSV columns vary by version — try to map robustly
-        row: dict[str, Any] = {}
-        for i, h in enumerate(headers):
-            if i < len(parts):
-                row[h.lower().strip()] = parts[i]
+        # Columns: TRACK_ID  ARTIST_ID  ALBUM_ID  PATH  DURATION  [TAGS...]
+        raw_track_id = parts[0]   # e.g. "track_0000214"
+        artist_id    = parts[1]   # e.g. "artist_000014"
+        path_field   = parts[3]   # e.g. "14/214.mp3"
+        duration_str = parts[4]   # e.g. "124.6"
+        tag_str      = parts[5] if len(parts) > 5 else ""
 
-        # Normalise key names
-        track_id = (
-            row.get("track_id") or row.get("id") or
-            (parts[0] if parts else None)
-        )
-        if not track_id:
-            continue
+        # Extract numeric track ID for the CDN URL
+        numeric_id = raw_track_id.replace("track_", "").lstrip("0") or "0"
 
-        # Tags are space-separated in the last column(s)
-        tag_str = row.get("tags", "") or " ".join(parts[5:]) if len(parts) > 5 else ""
-        tags = set(t.lower().strip() for t in tag_str.replace(",", " ").split() if t.strip())
-
-        # Artist name: Jamendo doesn't include it in the TSV, we add from track path
-        path_field = row.get("path", "") or (parts[3] if len(parts) > 3 else "")
-        # path looks like: 01/0123456.mp3
-        artist_id = row.get("artist_id") or (parts[1] if len(parts) > 1 else "")
-        title = row.get("title") or Path(path_field).stem if path_field else track_id
+        # Parse tags: "genre---electronic genre---ambient" → {"electronic","ambient"}
+        tags: set[str] = set()
+        for token in tag_str.split():
+            token = token.strip()
+            if "---" in token:
+                tags.add(token.split("---", 1)[1].lower())
+            elif token:
+                tags.add(token.lower())
 
         try:
-            duration = float(row.get("duration") or parts[4])
-        except (ValueError, IndexError):
-            duration = 0.0
+            duration = float(duration_str)
+        except ValueError:
+            continue
 
         if duration < 10:
             continue
 
-        # Apply subset filter
-        filter_tags = SUBSET_TAGS.get(subset, set())
+        # Subset filter (empty set = no filter)
         if filter_tags and not (tags & filter_tags):
             continue
 
+        # Use path stem as title (e.g. "214") — enriched later if --client-id given
+        title = Path(path_field).stem
+
         tracks.append({
-            "id": track_id.strip(),
+            "id": numeric_id,           # numeric — used in CDN URL and filename
+            "raw_track_id": raw_track_id,
             "name": title,
-            "artist_id": artist_id.strip(),
-            "artist_name": f"Artist-{artist_id.strip()[:8]}",  # enriched later
+            "artist_id": artist_id,
+            "artist_name": "",          # filled by enrich_artist_names() if available
             "duration": duration,
             "tags": sorted(tags),
         })
