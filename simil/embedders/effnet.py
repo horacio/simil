@@ -36,8 +36,11 @@ MODEL_URL = (
 )
 MODEL_FILENAME = "discogs-effnet-bsdynamic-1.onnx"
 
-# ONNX output node name for the embedding layer (1280-dim, pre-classification)
-EMBEDDING_OUTPUT = "PartitionedCall:1"
+# Index of the embedding output among the model's outputs.
+# The model has two outputs: [0] classification logits, [1] 1280-dim embeddings.
+# We reference by index rather than by name because newer ONNX Runtime versions
+# reject TF-style names containing colons (e.g. "PartitionedCall:1").
+EMBEDDING_OUTPUT_IDX = 1
 
 # Audio preprocessing parameters matching Essentia's TensorflowPredictEffnetDiscogs
 SAMPLE_RATE: int = 16_000
@@ -75,6 +78,7 @@ class EffNetEmbedder(BaseEmbedder):
         """
         self._model_path = model_path
         self._session: object | None = None  # ort.InferenceSession, lazy-loaded
+        self._embedding_output_name: str | None = None  # resolved on first use
 
     # ── Protocol properties ───────────────────────────────────────────────────
 
@@ -128,7 +132,8 @@ class EffNetEmbedder(BaseEmbedder):
 
             session = self._get_session()
             input_name = session.get_inputs()[0].name
-            outputs = session.run([EMBEDDING_OUTPUT], {input_name: patches})
+            emb_name = self._embedding_output_name
+            outputs = session.run([emb_name], {input_name: patches})
 
             vec = outputs[0].mean(axis=0).astype(np.float32)  # (n_patches, 1280) → (1280,)
             norm = np.linalg.norm(vec)
@@ -185,7 +190,8 @@ class EffNetEmbedder(BaseEmbedder):
 
             # One ONNX call for all patches
             batch = np.concatenate(per_file_patches, axis=0)  # (total_patches, 128, 96)
-            outputs = session.run([EMBEDDING_OUTPUT], {input_name: batch})
+            emb_name = self._embedding_output_name
+            outputs = session.run([emb_name], {input_name: batch})
             all_embeddings = outputs[0]  # (total_patches, 1280)
 
             # Split back by file, mean-pool, L2-normalise
@@ -231,6 +237,18 @@ class EffNetEmbedder(BaseEmbedder):
                 str(model_path),
                 providers=["CPUExecutionProvider"],
             )
+            # Resolve embedding output name by index — avoids hardcoding TF-style
+            # names like "PartitionedCall:1" that newer ONNX Runtime rejects.
+            outputs = self._session.get_outputs()
+            if len(outputs) <= EMBEDDING_OUTPUT_IDX:
+                raise EmbeddingError(
+                    f"EffNet model has only {len(outputs)} output(s); "
+                    f"expected at least {EMBEDDING_OUTPUT_IDX + 1}. "
+                    "The model file may be corrupted — delete "
+                    f"{model_path} and re-run to re-download it."
+                )
+            self._embedding_output_name = outputs[EMBEDDING_OUTPUT_IDX].name
+            logger.info("EffNet embedding output: %r", self._embedding_output_name)
         return self._session
 
 
