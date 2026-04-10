@@ -45,7 +45,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -171,6 +170,14 @@ def main() -> None:
         help="Path to a pre-downloaded FMA audio directory. Skips the download step.",
     )
     parser.add_argument(
+        "--cache-dir", type=Path,
+        default=Path.home() / ".simil" / "build_cache",
+        help=(
+            "Directory to cache the downloaded zip so reruns skip the download "
+            "(default: ~/.simil/build_cache)"
+        ),
+    )
+    parser.add_argument(
         "--workers", type=int, default=4,
         help="Number of parallel embedding workers (default: 4)",
     )
@@ -196,92 +203,110 @@ def main() -> None:
             sys.exit(f"Error: --audio-dir {audio_dir} is not a directory")
         print(f"[1/4] Using existing audio directory: {audio_dir}")
     else:
-        print(f"[1/4] Downloading FMA audio ({subset_info['audio_size_hint']})…")
-        with tempfile.TemporaryDirectory(prefix="simil_build_") as tmp:
-            tmp_path = Path(tmp)
-            zip_path = tmp_path / f"{args.subset}.zip"
-            _download(subset_info["audio_url"], zip_path)
+        cache_dir = args.cache_dir.expanduser()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = cache_dir / f"{args.subset}.zip"
+        audio_dir = cache_dir / args.subset
 
-            audio_dir = tmp_path / "audio"
-            audio_dir.mkdir()
+        if audio_dir.is_dir():
+            # Already extracted from a previous run — skip download + unzip
+            print(f"[1/4] Using cached audio: {audio_dir}")
+        else:
+            if zip_path.exists():
+                print(f"[1/4] Using cached zip (skipping download): {zip_path}")
+            else:
+                print(
+                    f"[1/4] Downloading FMA audio ({subset_info['audio_size_hint']})…\n"
+                    f"  Cached to: {zip_path}\n"
+                    f"  Re-runs will skip this step automatically."
+                )
+                _download(subset_info["audio_url"], zip_path)
+
+            audio_dir.mkdir(parents=True, exist_ok=True)
             _unzip(zip_path, audio_dir)
-            # FMA zips extract into a subdirectory named after the subset
+            # FMA zips extract into a subdirectory — unwrap if needed
             subdirs = [d for d in audio_dir.iterdir() if d.is_dir()]
             if len(subdirs) == 1:
                 audio_dir = subdirs[0]
+            print(f"  Audio ready at: {audio_dir}")
 
-    # ── Step 2: Build index ─────────────────────────────────────────────────
-    print(f"\n[2/4] Building index with {args.embedder}…")
-    library_name = f"build_{short_name}"
+    try:
+        # ── Step 2: Build index ─────────────────────────────────────────────
+        print(f"\n[2/4] Building index with {args.embedder}…")
+        library_name = f"build_{short_name}"
 
-    from simil.catalog import TrackCatalog
-    from simil.cli.main import _get_index_dir
-    from simil.config import Settings
-    from simil.embedders import get_embedder
-    from simil.index.numpy_index import NumpyIndex
-    from simil.library.indexer import Indexer
+        from simil.catalog import TrackCatalog
+        from simil.cli.main import _get_index_dir
+        from simil.config import Settings
+        from simil.embedders import get_embedder
+        from simil.index.numpy_index import NumpyIndex
+        from simil.library.indexer import Indexer
 
-    index_dir = _get_index_dir(library_name)
-    index_dir.mkdir(parents=True, exist_ok=True)
+        index_dir = _get_index_dir(library_name)
+        index_dir.mkdir(parents=True, exist_ok=True)
 
-    emb = get_embedder(args.embedder)
-    idx = NumpyIndex(
-        embedding_dim=emb.embedding_dim,
-        embedder_name=args.embedder,
-        library_id=library_name,
-        audio_config=emb.audio_config,
-    )
-    cat = TrackCatalog(library_id=library_name)
-    settings = Settings(library_name=library_name, workers=args.workers)
-    indexer = Indexer(embedder=emb, index=idx, catalog=cat, settings=settings)
-    build_result = indexer.build(audio_dir, full=True)
-    print(
-        f"  Indexed {build_result.indexed:,} tracks, "
-        f"skipped {build_result.skipped}, "
-        f"failed {len(build_result.failed)} "
-        f"in {build_result.duration_seconds:.1f}s"
-    )
+        emb = get_embedder(args.embedder)
+        idx = NumpyIndex(
+            embedding_dim=emb.embedding_dim,
+            embedder_name=args.embedder,
+            library_id=library_name,
+            audio_config=emb.audio_config,
+        )
+        cat = TrackCatalog(library_id=library_name)
+        settings = Settings(library_name=library_name, workers=args.workers)
+        indexer = Indexer(embedder=emb, index=idx, catalog=cat, settings=settings)
+        build_result = indexer.build(audio_dir, full=True)
+        print(
+            f"  Indexed {build_result.indexed:,} tracks, "
+            f"skipped {build_result.skipped}, "
+            f"failed {len(build_result.failed)} "
+            f"in {build_result.duration_seconds:.1f}s"
+        )
 
-    if not (index_dir / "meta.json").exists():
-        sys.exit("Error: indexing failed — meta.json not found")
+        if not (index_dir / "meta.json").exists():
+            sys.exit("Error: indexing produced no meta.json")
 
-    # ── Step 3: Verify output ────────────────────────────────────────────────
-    print(f"\n[3/4] Verifying index…")
-    meta = json.loads((index_dir / "meta.json").read_text())
-    catalog = json.loads((index_dir / "catalog.json").read_text())
-    track_count = len(catalog.get("tracks", []))
-    print(f"  Tracks   : {track_count:,}")
-    print(f"  Embedder : {meta['embedder']}")
-    print(f"  Dim      : {meta['embedding_dim']}")
+        # ── Step 3: Verify output ───────────────────────────────────────────
+        print(f"\n[3/4] Verifying index…")
+        meta = json.loads((index_dir / "meta.json").read_text())
+        catalog_data = json.loads((index_dir / "catalog.json").read_text())
+        track_count = len(catalog_data.get("tracks", []))
+        print(f"  Tracks   : {track_count:,}")
+        print(f"  Embedder : {meta['embedder']}")
+        print(f"  Dim      : {meta['embedding_dim']}")
 
-    # ── Step 4: Package ─────────────────────────────────────────────────────
-    print(f"\n[4/4] Packaging archive…")
-    _make_archive(index_dir, archive_path)
+        # ── Step 4: Package ─────────────────────────────────────────────────
+        print(f"\n[4/4] Packaging archive…")
+        _make_archive(index_dir, archive_path)
 
-    sha = _sha256(archive_path)
-    size_bytes = archive_path.stat().st_size
-    size_mb = size_bytes / (1024 * 1024)
+        sha = _sha256(archive_path)
+        size_bytes = archive_path.stat().st_size
+        size_mb = size_bytes / (1024 * 1024)
 
-    print(f"\n{'─' * 60}")
-    print(f"  Archive  : {archive_path}")
-    print(f"  Size     : {size_mb:.1f} MB  ({size_bytes:,} bytes)")
-    print(f"  SHA-256  : {sha}")
-    print(f"{'─' * 60}")
-    print()
-    print("Next steps:")
-    print(f"  1. Upload to GitHub Releases (tag: indexes):")
-    print(f"       gh release create indexes --title 'Pre-built indexes' \\")
-    print(f"           {archive_path}")
-    print()
-    print(f"  2. Update registry.json with:")
-    release_url = (
-        f"https://github.com/horacio/simil/releases/download/indexes/{archive_name}"
-    )
-    print(f'       "url":        "{release_url}",')
-    print(f'       "sha256":     "{sha}",')
-    print(f'       "size_bytes": {size_bytes}')
-    print()
-    print(f"  3. Commit and push registry.json — users can now `simil fetch {short_name}`")
+        release_url = (
+            f"https://github.com/horacio/simil/releases/download/indexes/{archive_name}"
+        )
+
+        print(f"\n{'─' * 60}")
+        print(f"  Archive  : {archive_path}")
+        print(f"  Size     : {size_mb:.1f} MB  ({size_bytes:,} bytes)")
+        print(f"  SHA-256  : {sha}")
+        print(f"{'─' * 60}")
+        print()
+        print("Next steps:")
+        print(f"  1. Upload to GitHub Releases (tag: indexes):")
+        print(f"       gh release create indexes --title 'Pre-built indexes' \\")
+        print(f"           {archive_path}")
+        print()
+        print(f"  2. Update registry.json with:")
+        print(f'       "url":        "{release_url}",')
+        print(f'       "sha256":     "{sha}",')
+        print(f'       "size_bytes": {size_bytes}')
+        print()
+        print(f"  3. Commit and push registry.json — users can now `simil fetch {short_name}`")
+
+    finally:
+        pass  # audio cached at ~/.simil/build_cache — intentionally kept
 
 
 if __name__ == "__main__":
