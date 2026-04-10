@@ -298,17 +298,22 @@ class TestNormaliseScores:
         assert raw == pytest.approx(0.8)
         assert 0.0 <= norm <= 1.0
 
-    def test_min_max_normalisation(self) -> None:
-        """Multiple results: min-max normalise to [0, 1]."""
+    def test_scores_are_raw_cosine_clipped(self) -> None:
+        """Display score is the raw cosine clipped to [0, 1], not min-max."""
         inputs = [("t1", 0.9), ("t2", 0.6), ("t3", 0.3)]
         results = _normalise_scores(inputs)
-        norms = [n for _, _, n in results]
-        assert max(norms) == pytest.approx(1.0)
-        assert min(norms) == pytest.approx(0.0)
+        assert results[0][2] == pytest.approx(0.9)
+        assert results[1][2] == pytest.approx(0.6)
+        assert results[2][2] == pytest.approx(0.3)
 
-    def test_all_same_score(self) -> None:
-        """All-same scores normalise to 1.0."""
+    def test_negative_raw_score_clamped_to_zero(self) -> None:
+        """Raw scores below 0 are clipped to 0.0 for display."""
+        results = _normalise_scores([("t1", -0.1)])
+        assert results[0][2] == pytest.approx(0.0)
+
+    def test_all_same_score_preserved(self) -> None:
+        """All-same scores are returned as-is (no distortion)."""
         inputs = [("t1", 0.5), ("t2", 0.5), ("t3", 0.5)]
         results = _normalise_scores(inputs)
         for _, _, n in results:
-            assert n == pytest.approx(1.0)
+            assert n == pytest.approx(0.5)

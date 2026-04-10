@@ -581,6 +581,13 @@ function renderResults(results) {
     card.className = "result-card";
 
     const pct = Math.round(r.score * 100);
+    // Colour the score bar: red below 50%, yellow 50-70%, green above 70%
+    const scoreColor = r.score >= 0.70 ? "var(--green)"
+                     : r.score >= 0.50 ? "#e0b030"
+                     : "var(--red)";
+    const scoreLabel = r.score >= 0.70 ? "similar"
+                     : r.score >= 0.50 ? "somewhat similar"
+                     : "low similarity";
     const title = esc(r.title || basename(r.path || "") || "Unknown");
     const artist = esc(r.artist || "");
     const pathStr = esc(r.path || "");
@@ -597,9 +604,11 @@ function renderResults(results) {
 
     card.innerHTML = `
       <div class="rank">${r.rank}</div>
-      <div class="score-bar-wrap">
-        <div class="score-val">${pct}%</div>
-        <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
+      <div class="score-bar-wrap" title="${scoreLabel}">
+        <div class="score-val" style="color:${scoreColor}">${pct}%</div>
+        <div class="score-bar">
+          <div class="score-fill" style="width:${pct}%; background:${scoreColor}"></div>
+        </div>
       </div>
       <div class="track-info">
         <div class="track-title">${title}</div>

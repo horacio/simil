@@ -213,27 +213,24 @@ class SearchEngine:
 def _normalise_scores(
     results: list[tuple[str, float]],
 ) -> list[tuple[str, float, float]]:
-    """Min-max normalise raw cosine similarity scores to [0.0, 1.0].
+    """Attach a display score to each result.
+
+    The ``score`` field is the raw cosine similarity clipped to [0, 1] — it
+    represents actual similarity to the query, not relative rank among results.
+
+    Min-max normalisation over the result set was intentionally removed: it
+    stretched a tiny range (e.g. 0.81–0.83) to [0, 1], making the worst result
+    look 0% similar and the best look 100%, even when neither was meaningfully
+    similar to the query.
 
     Args:
-        results: List of ``(track_id, raw_score)`` pairs.
+        results: List of ``(track_id, raw_score)`` pairs, sorted descending.
 
     Returns:
-        List of ``(track_id, raw_score, normalised_score)`` triples.
+        List of ``(track_id, raw_score, display_score)`` triples where
+        ``display_score`` is the raw cosine clipped to [0.0, 1.0].
     """
-    if not results:
-        return []
-
-    raw_scores = [r[1] for r in results]
-
-    if len(raw_scores) < 2:
-        clamped = float(np.clip(raw_scores[0], 0.0, 1.0))
-        return [(results[0][0], raw_scores[0], clamped)]
-
-    mn = min(raw_scores)
-    mx = max(raw_scores)
-
-    if mx == mn:
-        return [(tid, rs, 1.0) for tid, rs in results]
-
-    return [(tid, rs, float((rs - mn) / (mx - mn))) for tid, rs in results]
+    return [
+        (tid, rs, float(np.clip(rs, 0.0, 1.0)))
+        for tid, rs in results
+    ]
