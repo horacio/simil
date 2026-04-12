@@ -158,6 +158,12 @@ class Indexer:
         # Final save
         self._checkpoint()
 
+        # Centre the index: subtract corpus mean so cosine distance reflects
+        # actual musical similarity rather than a shared embedding-space bias.
+        if self.index.size > 0:
+            self.index.center()
+            self._checkpoint()
+
         duration = time.monotonic() - start_time
         result = IndexerResult(
             indexed=indexed,

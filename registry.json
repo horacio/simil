@@ -1,9 +1,23 @@
 {
-  "name":        "mtg-jamendo",
-  "description": "MTG-Jamendo all — 30,522 CC-licensed tracks (curated by MTG Barcelona, the EffNet-discogs model creators)",
-  "embedder":    "effnet-discogs",
-  "tracks":      30522,
-  "url":         "https://github.com/horacio/simil/releases/download/indexes/mtg-jamendo-effnet-discogs.tar.gz",
-  "sha256":      "c2dfe97e35e254f045741af4021285e354714ff75f48248ad381e41eaf02bfa7",
-  "size_bytes":  141718947
+  "schema_version": 1,
+  "indexes": [
+    {
+      "name":        "fma-small",
+      "description": "Free Music Archive — 8,000 tracks across 8 genres (30-second clips, CC-licensed)",
+      "embedder":    "effnet-discogs",
+      "tracks":      7994,
+      "url":         "https://github.com/horacio/simil/releases/download/indexes/fma-small-effnet-discogs.tar.gz",
+      "sha256":      "bd77818cc5d0358e78dae572d6b91ffa0e948bacc516ac714ccb7e72c693d3d6",
+      "size_bytes":  38642145
+    },
+    {
+      "name":        "mtg-jamendo",
+      "description": "MTG-Jamendo — 30,522 CC-licensed tracks curated by MTG Barcelona (creators of the EffNet-discogs model)",
+      "embedder":    "effnet-discogs",
+      "tracks":      30522,
+      "url":         "https://github.com/horacio/simil/releases/download/indexes/mtg-jamendo-effnet-discogs.tar.gz",
+      "sha256":      "3b51b4dea1fa1b362e8da2dea62d0fecb843b36d0064f7150baf496d2ec78f28",
+      "size_bytes":  147740737
+    }
+  ]
 }

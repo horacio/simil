@@ -57,6 +57,9 @@ class NumpyIndex:
         self._id_to_idx: dict[str, int] = {}
 
         self._built_at: str = datetime.now(timezone.utc).isoformat()
+        # Corpus mean, subtracted from query vectors at search time.
+        # None until center() is called.
+        self._centroid: np.ndarray | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -112,6 +115,39 @@ class NumpyIndex:
         self._ids.extend(track_ids)
         self._pending.extend(new_vecs)
 
+    def center(self) -> np.ndarray:
+        """Remove the corpus mean from all stored vectors (in-place).
+
+        EffNet-discogs embeddings have a very strong DC component — every track
+        has ~96% of its embedding mass pointing in the same "music" direction,
+        leaving only ~4% for actual musical differences.  Subtracting the corpus
+        mean and renormalising collapses that bias and lets cosine distance
+        reflect true similarity rather than a shared "sounds like music" signal.
+
+        Call this once after all vectors have been added.  The centroid is saved
+        with the index and applied to query vectors at search time so both sides
+        of the dot product live in the same centred space.
+
+        Returns:
+            The centroid vector that was subtracted (shape ``(embedding_dim,)``).
+        """
+        self._materialise()
+        if self._matrix.shape[0] == 0:
+            return np.zeros(self._embedding_dim, dtype=np.float32)
+
+        centroid = self._matrix.mean(axis=0)  # (D,)
+        centered = self._matrix - centroid[None, :]  # (N, D)
+        norms = np.linalg.norm(centered, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-8)
+        self._matrix = (centered / norms).astype(np.float32)
+        self._centroid = centroid.astype(np.float32)
+        logger.info(
+            "Centred NumpyIndex: corpus mean norm=%.4f  (size=%d)",
+            float(np.linalg.norm(centroid)),
+            self.size,
+        )
+        return self._centroid
+
     def remove(self, track_id: str) -> None:
         """Remove a track from the index.
 
@@ -161,8 +197,13 @@ class NumpyIndex:
         if self._matrix.shape[0] == 0:
             return []
 
-        # Defensive L2-normalise the query
+        # Apply corpus centering (if available) then L2-normalise.
+        # Both the stored vectors and the query must live in the same centred
+        # space so the dot product measures true similarity, not just the shared
+        # "DC" direction that dominates raw EffNet-discogs embeddings.
         query32 = np.asarray(query, dtype=np.float32)
+        if self._centroid is not None:
+            query32 = query32 - self._centroid
         norm = np.linalg.norm(query32)
         if norm > 0.0:
             query32 = query32 / norm
@@ -242,6 +283,13 @@ class NumpyIndex:
             ids_tmp.write_text(json.dumps(self._ids, ensure_ascii=False), encoding="utf-8")
             os.replace(str(ids_tmp), str(ids_path))
 
+            # --- centroid.npy (optional) ---
+            if self._centroid is not None:
+                centroid_tmp = path / "centroid.tmp.npy"
+                centroid_path = path / "centroid.npy"
+                np.save(str(centroid_tmp), self._centroid)
+                os.replace(str(centroid_tmp), str(centroid_path))
+
             # --- meta.json ---
             meta = {
                 "schema_version": SCHEMA_VERSION,
@@ -303,6 +351,11 @@ class NumpyIndex:
         index._ids = ids
         index._id_to_idx = {tid: i for i, tid in enumerate(ids)}
         index._built_at = meta.get("built_at", "")
+
+        centroid_path = path / "centroid.npy"
+        if centroid_path.exists():
+            index._centroid = np.load(str(centroid_path)).astype(np.float32)
+            logger.info("Loaded centroid for NumpyIndex (norm=%.4f)", float(np.linalg.norm(index._centroid)))
 
         logger.info("Loaded NumpyIndex (%d vectors, dim=%d) from %s", len(ids), meta["embedding_dim"], path)
         return index
