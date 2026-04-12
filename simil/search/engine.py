@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -109,32 +108,26 @@ class SearchEngine:
     def _search_local(
         self, source_path: Path, k: int, threshold: float
     ) -> list[SearchResult]:
-        """Embed and search a local audio file."""
-        query_vector: EmbeddingVector
+        """Embed and search a local audio file.
+
+        The query vector is always produced by a fresh embed call.  Using a
+        cached (stored) vector is intentionally avoided: the index stores
+        *centred* vectors but ``index.search`` centres the query itself, so
+        reusing a cached vector would double-centre it and produce garbage
+        scores.  Embedding is fast enough (~0.5 s) that the cache hit would
+        not be worth the correctness risk.
+        """
+        # Embed fresh — always in the same (raw, un-centred) space that
+        # index.search() expects to receive and will centre internally.
+        query_vector: EmbeddingVector = self.embedder.embed(source_path)
+        logger.debug("Embedded query: %s", source_path.name)
+
+        # If the file is already in the library, exclude it from results so
+        # the query track does not appear as its own best match.
         exclude_ids: list[str] = []
-
         cid = content_id(source_path)
-        current_mtime = os.path.getmtime(str(source_path))
-
         if self.catalog.contains(cid):
-            existing = self.catalog.get(cid)
-            if existing is not None and existing.mtime == current_mtime:
-                cached = self.index.get_vector(cid)
-                if cached is not None:
-                    query_vector = cached
-                    exclude_ids = [cid]
-                    logger.debug("Using cached vector for %s", source_path.name)
-                else:
-                    # Catalog/index desync — re-embed
-                    query_vector = self._embed_and_update(source_path, cid, current_mtime)
-                    exclude_ids = [cid]
-            else:
-                # mtime changed — re-embed and update
-                query_vector = self._embed_and_update(source_path, cid, current_mtime)
-                exclude_ids = [cid]
-        else:
-            query_vector = self.embedder.embed(source_path)
-            logger.debug("Embedded fresh (not in library): %s", source_path.name)
+            exclude_ids = [cid]
 
         raw_results = self.index.search(
             query_vector,
@@ -188,26 +181,6 @@ class SearchEngine:
                 )
             )
         return results
-
-    def _embed_and_update(
-        self, path: Path, cid: str, mtime: float
-    ) -> EmbeddingVector:
-        """Re-embed a track and update the index + catalog in place."""
-        vec = self.embedder.embed(path)
-        try:
-            self.index.remove(cid)
-        except Exception:
-            pass
-        self.index.add(cid, vec)
-
-        existing = self.catalog.get(cid)
-        if existing is not None:
-            from dataclasses import replace  # noqa: PLC0415
-
-            self.catalog.add(replace(existing, mtime=mtime))
-
-        logger.debug("Re-embedded and updated: %s", path.name)
-        return vec
 
 
 def _normalise_scores(
