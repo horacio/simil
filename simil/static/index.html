@@ -288,6 +288,22 @@
     }
     .result-card:hover .track-path { color: var(--text-dim); }
 
+    .album-art {
+      width: 48px;
+      height: 48px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .track-source-link {
+      font-size: 0.72rem;
+      color: var(--accent);
+      text-decoration: none;
+      margin-top: 2px;
+      display: inline-block;
+    }
+    .track-source-link:hover { text-decoration: underline; }
+
     /* Audio player */
     .play-btn {
       flex-shrink: 0;
@@ -591,6 +607,9 @@ function renderResults(results) {
     const title = esc(r.title || basename(r.path || "") || "Unknown");
     const artist = esc(r.artist || "");
     const pathStr = esc(r.path || "");
+    const extra = r.extra || {};
+    const deezerUrl = extra.deezer_url || "";
+    const albumArt = extra.album_art_url || "";
 
     const playIcon = `<svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
       <path d="M8 5v14l11-7z"/>
@@ -610,10 +629,13 @@ function renderResults(results) {
           <div class="score-fill" style="width:${pct}%; background:${scoreColor}"></div>
         </div>
       </div>
+      ${albumArt ? `<img class="album-art" src="${albumArt}" alt="" loading="lazy">` : ""}
       <div class="track-info">
         <div class="track-title">${title}</div>
         ${artist ? `<div class="track-artist">${artist}</div>` : ""}
-        <div class="track-path">${pathStr}</div>
+        ${deezerUrl
+          ? `<a class="track-source-link" href="${deezerUrl}" target="_blank" rel="noopener">Open in Deezer</a>`
+          : `<div class="track-path">${pathStr}</div>`}
       </div>
       <button class="find-more-btn" data-track-id="${r.track_id}" title="Find more like this">
         More like this

@@ -301,4 +301,5 @@ def _format_result(r: object) -> dict:
         "album": result.track.album,
         "duration": result.track.duration_seconds,
         "has_audio": result.track.path.exists(),
+        "extra": result.track.extra,
     }

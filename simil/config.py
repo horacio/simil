@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     library_name: str = "default"
 
     # Embedder / backend
-    embedder: str = "mfcc"
+    embedder: str = "effnet-discogs"
     index_backend: str = "numpy"
 
     # Audio clip parameters
